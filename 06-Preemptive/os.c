@@ -3,11 +3,12 @@
 #include "reg.h"
 #include "asm.h"
 
+
 /* Size of our user task stacks in words */
 #define STACK_SIZE	256
 
 /* Number of user task */
-#define TASK_LIMIT	3
+#define TASK_LIMIT	5
 
 /* USART TXE Flag
  * This flag is cleared when data is written to USARTx_DR and
@@ -32,6 +33,15 @@ void usart_init(void)
 	*(USART2_CR3) = 0x00000000;
 	*(USART2_CR1) |= 0x2000;
 }
+
+typedef struct Task{
+    const char* task_name;
+    unsigned int priority;//the number bigger,then the priority is higher
+    unsigned int *task_address;
+    unsigned int user_stack[STACK_SIZE];
+} xTask;
+
+	xTask user_task[TASK_LIMIT];
 
 void print_str(const char *str)
 {
@@ -63,7 +73,7 @@ void delay(int count)
  * works correctly.
  * http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0552a/Babefdjc.html
  */
-unsigned int *create_task(unsigned int *stack, void (*start)(void))
+unsigned int *create_task(unsigned int *stack, void (*start)(void), unsigned int priority,const char* name,size_t task_count)
 {
 	static int first = 1;
 
@@ -76,18 +86,47 @@ unsigned int *create_task(unsigned int *stack, void (*start)(void))
 		stack[15] = (unsigned int) start;
 		stack[16] = (unsigned int) 0x01000000; /* PSR Thumb bit */
 	}
+	user_task[task_count].priority = priority;
+	user_task[task_count].task_name = name;
 	stack = activate(stack);
 
 	return stack;
 }
 
+void Task_scheduler(xTask tasks[],size_t created_task_number)
+{
+    int current_task = 0;
+    int max = 0;
+    int i = 0;
+    while(1)
+    {
+	current_task = 0;
+	max = tasks[0].priority;
+	i = 0;
+	for(; i < created_task_number; i++)
+	{
+	    if(tasks[i].priority > max)
+	    {
+		max = tasks[i].priority;
+		current_task = i;
+	    }
+	}
+		print_str("OS: Activate next task\n");
+		user_task[current_task].task_address = activate(user_task[current_task].task_address);
+		print_str("OS: Back to OS\n");
+    }
+}
+
+
+
 void task1_func(void)
 {
 	print_str("task1: Created!\n");
-	print_str("task1: Now, return to kernel mode\n");
 	syscall();
 	while (1) {
-		print_str("task1: Running...\n");
+		print_str("Running...");
+		print_str(user_task[0].task_name);
+		print_str("\n");
 		delay(1000);
 	}
 }
@@ -95,46 +134,71 @@ void task1_func(void)
 void task2_func(void)
 {
 	print_str("task2: Created!\n");
-	print_str("task2: Now, return to kernel mode\n");
 	syscall();
 	while (1) {
-		print_str("task2: Running...\n");
+		print_str("Running...");
+		print_str(user_task[1].task_name);
+		print_str("\n");
 		delay(1000);
 	}
 }
 
+
+void task3_func(void)
+{
+	print_str("task3: Created!\n");
+	syscall();
+	while (1) {
+		print_str("Running...");
+		print_str(user_task[2].task_name);
+		print_str("\n");
+		delay(1000);
+	}
+}
+
+
+void task4_func(void)
+{
+	print_str("task4: Created!\n");
+	syscall();
+	while (1) {
+		print_str("Running...");
+		print_str(user_task[3].task_name);
+		print_str("\n");
+		delay(1000);
+	}
+}
+
+
+
 int main(void)
 {
-	unsigned int user_stacks[TASK_LIMIT][STACK_SIZE];
-	unsigned int *usertasks[TASK_LIMIT];
 	size_t task_count = 0;
-	size_t current_task;
+	//size_t current_task;
 
 	usart_init();
 
 	print_str("OS: Starting...\n");
 	print_str("OS: First create task 1\n");
-	usertasks[0] = create_task(user_stacks[0], &task1_func);
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task1_func, 2, "task_name_1", task_count);
 	task_count += 1;
 	print_str("OS: Back to OS, create task 2\n");
-	usertasks[1] = create_task(user_stacks[1], &task2_func);
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task2_func, 12, "task_name_2", task_count);
 	task_count += 1;
 
-	print_str("\nOS: Start round-robin scheduler!\n");
+	print_str("OS: Back to OS, create task 3\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task3_func, 10, "task_name_3", task_count);
+	task_count += 1;
+
+	print_str("OS: Back to OS, create task 4\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task4_func, 14, "task_name_4", task_count);
+	task_count += 1;
+
 
 	/* SysTick configuration */
 	*SYSTICK_LOAD = 7200000;
 	*SYSTICK_VAL = 0;
 	*SYSTICK_CTRL = 0x07;
-	current_task = 0;
-
-	while (1) {
-		print_str("OS: Activate next task\n");
-		usertasks[current_task] = activate(usertasks[current_task]);
-		print_str("OS: Back to OS\n");
-
-		current_task = current_task == (task_count - 1) ? 0 : current_task + 1;
-	}
-
+	Task_scheduler(user_task,task_count);//priority based scheduler
 	return 0;
 }

@@ -34,11 +34,20 @@ void usart_init(void)
 	*(USART2_CR1) |= 0x2000;
 }
 
+typedef enum Task_state{
+    	waiting,
+	running,
+	ready,
+	suspended,
+	created
+} task_state;
+
 typedef struct Task{
     const char* task_name;
     unsigned int priority;//the number bigger,then the priority is higher
     unsigned int *task_address;
     unsigned int user_stack[STACK_SIZE];
+    task_state state;
 } xTask;
 
 	xTask user_task[TASK_LIMIT];
@@ -86,17 +95,37 @@ unsigned int *create_task(unsigned int *stack, void (*start)(void), unsigned int
 		stack[15] = (unsigned int) start;
 		stack[16] = (unsigned int) 0x01000000; /* PSR Thumb bit */
 	}
+	user_task[task_count].state = created;
 	user_task[task_count].priority = priority;
 	user_task[task_count].task_name = name;
 	stack = activate(stack);
-
+	user_task[task_count].state = ready;
 	return stack;
 }
 
+void Task_suspend(xTask *task)
+{
+    task->state = suspended;
+    print_str(task->task_name);
+    print_str(" is suspended!\n");
+    *SYSTICK_VAL = 0;
+    syscall();
+}
+
+void Task_resume(xTask *task)
+{
+    task->state = ready;
+    print_str(task->task_name);
+    print_str(" resume to ready state!\n");
+    *SYSTICK_VAL = 0;
+    syscall();
+}
+
+
 void Task_scheduler(xTask tasks[],size_t created_task_number)
 {
-    int current_task = 0;
-    int max = 0;
+    size_t current_task = 0;
+    unsigned int max = 0;
     int i = 0;
     while(1)
     {
@@ -105,48 +134,60 @@ void Task_scheduler(xTask tasks[],size_t created_task_number)
 	i = 0;
 	for(; i < created_task_number; i++)
 	{
-	    if(tasks[i].priority > max)
+	    if(tasks[i].priority > max && (tasks[i].state == ready))
 	    {
 		max = tasks[i].priority;
 		current_task = i;
 	    }
 	}
 		print_str("OS: Activate next task\n");
-		user_task[current_task].task_address = activate(user_task[current_task].task_address);
+		if(tasks[current_task].state == ready)
+		{
+		tasks[current_task].state = running;
+		tasks[current_task].task_address = activate(tasks[current_task].task_address);
+		}
+		if(tasks[current_task].state == running)
+		{
+		    tasks[current_task].state = ready;
+		}
 		print_str("OS: Back to OS\n");
     }
 }
 
 
 
-void task1_func(void)
+void task0_func(void)
 {
-	print_str("task1: Created!\n");
+	print_str("task0: Created!\n");
 	syscall();
+	xTask *ptr = &user_task[1];
 	while (1) {
 		print_str("Running...");
 		print_str(user_task[0].task_name);
 		print_str("\n");
 		delay(1000);
+		Task_resume(ptr);
 	}
 }
 
-void task2_func(void)
+void task1_func(void)
 {
-	print_str("task2: Created!\n");
+	print_str("task1: Created!\n");
 	syscall();
+	xTask *ptr = &user_task[1];
 	while (1) {
 		print_str("Running...");
 		print_str(user_task[1].task_name);
 		print_str("\n");
 		delay(1000);
+		Task_suspend(ptr);
 	}
 }
 
 
-void task3_func(void)
+void task2_func(void)
 {
-	print_str("task3: Created!\n");
+	print_str("task2: Created!\n");
 	syscall();
 	while (1) {
 		print_str("Running...");
@@ -157,9 +198,9 @@ void task3_func(void)
 }
 
 
-void task4_func(void)
+void task3_func(void)
 {
-	print_str("task4: Created!\n");
+	print_str("task3: Created!\n");
 	syscall();
 	while (1) {
 		print_str("Running...");
@@ -179,26 +220,26 @@ int main(void)
 	usart_init();
 
 	print_str("OS: Starting...\n");
-	print_str("OS: First create task 1\n");
-	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task1_func, 2, "task_name_1", task_count);
+	print_str("OS: First create task 0\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task0_func, 2, "task_name_0", task_count);
 	task_count += 1;
-	print_str("OS: Back to OS, create task 2\n");
-	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task2_func, 12, "task_name_2", task_count);
+	print_str("OS: Back to OS, create task 1\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task1_func, 12, "task_name_1", task_count);
+	task_count += 1;
+
+	/*print_str("OS: Back to OS, create task 2\n");
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task2_func, 10, "task_name_2", task_count);
 	task_count += 1;
 
 	print_str("OS: Back to OS, create task 3\n");
-	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task3_func, 10, "task_name_3", task_count);
-	task_count += 1;
-
-	print_str("OS: Back to OS, create task 4\n");
-	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task4_func, 14, "task_name_4", task_count);
-	task_count += 1;
-
+	user_task[task_count].task_address = create_task(user_task[task_count].user_stack, &task3_func, 14, "task_name_3", task_count);
+	task_count += 1;*/
 
 	/* SysTick configuration */
 	*SYSTICK_LOAD = 7200000;
 	*SYSTICK_VAL = 0;
 	*SYSTICK_CTRL = 0x07;
+	print_str("Scheduler start!\n");
 	Task_scheduler(user_task,task_count);//priority based scheduler
 	return 0;
 }
